@@ -180,8 +180,35 @@ are deliberately unsorted.
 Also required: `mytools --version` prints a version and exits 0; `mytools` with no
 arguments prints usage to stderr and exits 2.
 
-**Accepted deviations from bedtools: none**, other than the usage-error exit codes in
-§7. If you find one you cannot fix, write it down here with the reason.
+**Accepted deviations from bedtools: two** — the usage-error exit codes in §7, and the
+zero-length-at-origin crash below. If you find another you cannot fix, write it down
+here with the reason.
+
+### Zero-length `-b` interval at position 0
+
+A zero-length interval at position 0 (`chr1 0 0`) anywhere in `-b` makes real bedtools
+abort before it reads a single `-a` record:
+
+```
+ERROR: Received illegal bin number -1 from getBin call.
+ERROR: Unable to add record to tree.
+```
+
+It bins an interval on its last base, `end - 1`, which underflows to `-1` here. Measured
+on v2.31.1: it hits `intersect` and `subtract` — the two that build a bin tree from `-b`
+— at load time, whatever the chromosome, and whether or not anything would have matched.
+`closest`, `merge` and `sort` take the same interval without complaint, and so does
+`intersect` when it is in `-a`: `data/a.bed` has one, `a12` is `chr2 0 0`.
+
+**We do not match it.** The input is legal BED by §3 and by bedtools' own reckoning
+everywhere else, so we process it. The §4 widening gives `chr1 0 0` an effective span of
+`-1..1`, so `intersect -a chr1 0 10 -b chr1 0 0` reports `chr1 0 1` — which is what
+bedtools' own rule produces one base over, where it does not crash: `chr1 5 5` in `-b`
+against the same `-a` gives `chr1 4 6`.
+
+No golden case covers this, because a golden case here would assert that we disagree
+with the oracle. `data/b.bed` deliberately contains no zero-length interval at 0; the
+unit tests pin our behaviour instead.
 
 ## 9. Language and layout
 

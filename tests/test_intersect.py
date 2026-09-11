@@ -297,6 +297,23 @@ class TestModes:
             "first",
         ]
 
+    def test_zero_length_b_at_position_zero(self, tmp_path, capsys):
+        """The one place we knowingly differ from the oracle. SPEC.md section 8.
+
+        Real bedtools aborts here -- it bins on `end - 1`, which underflows to -1 --
+        so this is our documented deviation, not oracle behaviour, and it is the
+        reason this is a unit test and not a golden case. The answer is bedtools'
+        own rule carried one base further than bedtools itself can go: a zero-length
+        -b feature widens to -1..1, so `chr1 0 10` comes back clipped to `chr1 0 1`,
+        exactly as `chr1 5 5` in -b gives `chr1 4 6` where bedtools does run.
+        """
+        a = bed(tmp_path, "a.bed", "chr1\t0\t10\tq\t0\t+")
+        b = bed(tmp_path, "b.bed", "chr1\t0\t0\tz\t0\t+")
+        assert intersect(capsys, a, b) == ["chr1\t0\t1\tq\t0\t+"]
+
+        oracle_agrees = bed(tmp_path, "b5.bed", "chr1\t5\t5\tz\t0\t+")
+        assert intersect(capsys, a, oracle_agrees) == ["chr1\t4\t6\tq\t0\t+"]
+
     def test_empty_result_prints_nothing(self, tmp_path, capsys):
         a = bed(tmp_path, "a.bed", "chr1\t100\t200\ta\t0\t+")
         b = bed(tmp_path, "b.bed", "chr9\t100\t200\tb\t0\t+")

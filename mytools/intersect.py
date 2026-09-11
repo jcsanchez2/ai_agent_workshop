@@ -35,6 +35,10 @@ def _inflated(interval):
     every case in the fixtures, on both sides of the comparison -- `a07`/`a12`/`a16` are
     zero-length in `-a` and behave the same way.
 
+    One case the oracle cannot adjudicate: a zero-length interval at position 0 in
+    `-b` widens to `-1..1`, and bedtools aborts rather than handling it. We do not
+    follow it there -- see SPEC.md section 8, which is where that deviation is recorded.
+
     The widened form is used for the overlap test and for clipping the reported region
     only. Printing always uses the interval as it was read, which is why `-wb` shows
     `chr1 100 100` for `b02` while the region beside it was clipped against `99 101`.
