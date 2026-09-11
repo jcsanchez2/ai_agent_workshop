@@ -40,9 +40,11 @@ mytools --version
 Flag names and meanings match bedtools exactly. `-` means stdin; at most one input per
 invocation may be `-`. `-b` must be a seekable file (we read it fully; see §6).
 
-**Entry point.** `./mytools` at the repo root is an executable wrapper that imports the
-package. Golden tests invoke `"${MYTOOLS:-./mytools}"` so the binary can be relocated
-without editing every test.
+**Entry point.** `./bin/mytools` is an executable wrapper that imports the package.
+Golden tests invoke `"${MYTOOLS:-./bin/mytools}"` so the binary can be relocated
+without editing every test. It lives under `bin/` rather than at the repo root because
+the package directory is `mytools/` and a directory cannot share its name with a file
+beside it.
 
 ## 3. Input formats
 
@@ -186,7 +188,7 @@ arguments prints usage to stderr and exits 2.
 Python — every subcommand and every test. No second language without asking.
 
 ```
-mytools                  executable wrapper, imports the package
+bin/mytools              executable wrapper, imports the package
 mytools/
   __init__.py
   cli.py                 argument parsing, dispatch, exit codes
