@@ -94,8 +94,9 @@ opposite strands, specifically to exercise this.
 - Empty result: print nothing, exit 0.
 - **`sort`** — all input columns preserved. Order is chrom (lexicographic, so `chr17`
   sorts before `chr7`), then `start`, then `end`.
-- **`merge`** — BED3 only (`chrom start end`). Input columns are dropped. With `-s`,
-  bedtools appends the strand column; match it.
+- **`merge`** — BED3 only (`chrom start end`). Input columns are dropped, `-s` included:
+  the brainstorm recorded that bedtools appends a strand column under `-s`, and measuring
+  v2.31.1 for #6 says it does not. Only `-c`/`-o`, out of scope in v1, add columns.
 - **`intersect`** — default prints the intersected region carrying `-a`'s trailing
   columns. `-wa` prints `-a`'s original interval, once per overlapping `-b` feature.
   `-wb` appends the overlapping `-b` feature. `-u` prints each `-a` feature at most
@@ -145,6 +146,14 @@ v1, and it is deliberately confined to cases the oracle never adjudicates.
 Error messages name the file and line where known:
 `a.bed:14: start > end (500 > 400)`. Message text is not compared against bedtools.
 
+**Partial output before a sortedness error.** `merge` and `closest` stream, so stdout can
+already carry completed output when an out-of-order record is found further down the
+file. bedtools behaves the same way — on a 200,002-line file with a chromosome revisit at
+the end it emits 199,684 lines before erroring — but on small inputs its output buffer has
+not been flushed yet, so it looks like it prints nothing. Do not emulate the buffer, and
+do not write a golden case for it: such a case pins bedtools' buffer size rather than its
+behaviour. Measured on v2.31.1 while implementing #6.
+
 ## 8. Correctness
 
 Real `bedtools` is the oracle. Non-negotiable.
@@ -181,7 +190,39 @@ Also required: `mytools --version` prints a version and exits 0; `mytools` with 
 arguments prints usage to stderr and exits 2.
 
 **Accepted deviations from bedtools: none**, other than the usage-error exit codes in
-§7. If you find one you cannot fix, write it down here with the reason.
+§7 and the `merge -s` corner below. If you find one you cannot fix, write it down here
+with the reason.
+
+### Known deviation: `merge -s` block bookkeeping (#6)
+
+Found by differential fuzzing against the oracle: 500 random sorted BED files, 484
+byte-identical, 16 divergent. **Every divergence needs `-s`**; without it we match, and
+all four golden cases (§8 #2–#4 plus stdin) match. Two implementations of #6 written
+independently of each other diverge on the same 16 files, which is the evidence that
+these are bedtools' quirks and not ours. Two causes, both in bedtools' internal
+bookkeeping rather than in the merge rule itself:
+
+- **Output order across a chromosome boundary** (13 of the 16). Where a strand's block
+  is still open when a new chromosome starts, bedtools can emit it *after* a block from
+  the new chromosome, interleaving the two:
+
+      chrX 51 61 -      bedtools: chrX 51 61    ours: chrX 51 61
+      chrX 59 64 +                chr1 54 59          chrX 59 64
+      chr1 54 59 +                chrX 59 64          chr1 54 59
+
+- **A lowered block start** (3 of the 16). Where features are deferred behind an open
+  block of the other strand, bedtools reprocesses them in coordinate order, so a
+  widened zero-length start can open the block. With `-d 3`, on `chr10`:
+
+      9 10 -, 13 14 +, 13 13 +  ->  bedtools: 9 9 / 12 14   ours: 9 9 / 13 14
+
+  Move the `-` feature beyond `-d` of the `+` pair and bedtools prints `13 14` again.
+
+Modelling either faithfully means emulating bedtools' deferral queue, and the obvious
+emulation (one open block plus a re-sorted cache) reproduces these corners but breaks
+the common path — measured: 26 and 144 divergences respectively, against 16 for what we
+ship. Held at 16 deliberately. Both corners need `-s`, a zero-length or opposite-strand
+feature, *and* a chromosome boundary or deferral; neither arises in `data/a.bed`.
 
 ## 9. Language and layout
 
