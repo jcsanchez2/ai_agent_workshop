@@ -59,6 +59,9 @@ class TestOrder:
         assert names(lines) == ["first", "second", "third"]
 
     def test_end_breaks_ties_on_start(self, tmp_path, capsys):
+        # Ours, not the oracle's: bedtools orders by chrom and start and stops there,
+        # so it would accept any order of these three. SPEC.md section 8 records the
+        # deviation and why we refine it with end.
         path = write(
             tmp_path,
             "chr1\t100\t300\twide\t0\t+\n"

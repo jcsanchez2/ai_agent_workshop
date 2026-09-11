@@ -93,7 +93,8 @@ opposite strands, specifically to exercise this.
 - Tab-separated, LF line endings, trailing newline on the final line.
 - Empty result: print nothing, exit 0.
 - **`sort`** — all input columns preserved. Order is chrom (lexicographic, so `chr17`
-  sorts before `chr7`), then `start`, then `end`.
+  sorts before `chr7`), then `start`, then `end`. bedtools itself only guarantees chrom
+  and `start`; the `end` term is ours, and §8 says why.
 - **`merge`** — BED3 only (`chrom start end`). Input columns are dropped. With `-s`,
   bedtools appends the strand column; match it.
 - **`intersect`** — default prints the intersected region carrying `-a`'s trailing
@@ -180,8 +181,78 @@ are deliberately unsorted.
 Also required: `mytools --version` prints a version and exits 0; `mytools` with no
 arguments prints usage to stderr and exits 2.
 
-**Accepted deviations from bedtools: none**, other than the usage-error exit codes in
-§7. If you find one you cannot fix, write it down here with the reason.
+**Accepted deviations from bedtools: three** — the usage-error exit codes in §7, and
+the two below. If you find another you cannot fix, write it down here with the reason.
+
+### Zero-length `-b` interval at position 0
+
+A zero-length interval at position 0 (`chr1 0 0`) anywhere in `-b` makes real bedtools
+abort before it reads a single `-a` record:
+
+```
+ERROR: Received illegal bin number -1 from getBin call.
+ERROR: Unable to add record to tree.
+```
+
+It bins an interval on its last base, `end - 1`, which underflows to `-1` here. Measured
+on v2.31.1: it hits `intersect` and `subtract` — the two that build a bin tree from `-b`
+— at load time, whatever the chromosome, and whether or not anything would have matched.
+`closest`, `merge` and `sort` take the same interval without complaint, and so does
+`intersect` when it is in `-a`: `data/a.bed` has one, `a12` is `chr2 0 0`.
+
+**We do not match it.** The input is legal BED by §3 and by bedtools' own reckoning
+everywhere else, so we process it. The §4 widening gives `chr1 0 0` an effective span of
+`-1..1`, so `intersect -a chr1 0 10 -b chr1 0 0` reports `chr1 0 1` — which is what
+bedtools' own rule produces one base over, where it does not crash: `chr1 5 5` in `-b`
+against the same `-a` gives `chr1 4 6`.
+
+No golden case covers this, because a golden case here would assert that we disagree
+with the oracle. `data/b.bed` deliberately contains no zero-length interval at 0; the
+unit tests pin our behaviour instead.
+
+### `sort` order among features sharing a chrom and start
+
+`bedtools sort` orders by chrom and `start` and **stops there**. Given two features at
+the same start but different ends it does not put the shorter first, or the longer, or
+the one that came first in the file — it returns whatever its unstable sort happens to
+leave. Measured on v2.31.1:
+
+```
+chr1 4904548 4904781 long        # input order, and the order bedtools returns
+chr1 4904548 4904660 short
+```
+
+Reverse those two input lines and bedtools reverses the output, so on small inputs it
+looks stable. It is not: sorting 200,000 intervals produces 114 chrom+start tie groups,
+and bedtools orders 136 of those rows by neither `end` nor input position. The output is
+deterministic run to run — an artefact of the sort algorithm, not of the data — but
+reproducing it would mean reproducing libstdc++'s introsort, which is not a contract
+anyone should depend on.
+
+Note what this does *not* cover: across those same 200,000 intervals, **no pair of fully
+identical `(chrom, start, end)` features was reordered**. Exact duplicates did keep their
+input order in every case measured, which is what `a09`/`a10` in `data/a.bed` pin. The
+unreproducible part is equal-start, different-end.
+
+**We sort by chrom, `start`, then `end`, stably** (§5). That is a refinement of what
+bedtools guarantees: every ordering we produce is a valid `bedtools sort` ordering, and
+we agree byte for byte wherever bedtools' own answer is determined. We differ only inside
+a chrom+start tie group, which is exactly where bedtools has no answer to be right about.
+All four committed fixtures — `a.bed`, `b.bed`, `genes.bed`, `hg002.highconf.bed` — match
+the oracle exactly, so no golden case is affected.
+
+**This is why `bed.check_sorted()` is wrong, and it is not wrong only here.** It compares
+on `(chrom, start, end)`, so it rejects the output of `bedtools sort` itself on any input
+with a chrom+start tie:
+
+```
+$ bedtools sort -i big.bed | mytools merge -i -
+input is not sorted, out of order record: chr1	4904548	4904660	r171735	0	+
+```
+
+It is also stricter than bedtools about chromosome order, which bedtools does not check
+at all. Tracked in #13, with the four measured cases; the fix belongs in `bed.py` (#4),
+not in the subcommands.
 
 ## 9. Language and layout
 
