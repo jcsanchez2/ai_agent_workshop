@@ -180,8 +180,18 @@ are deliberately unsorted.
 Also required: `mytools --version` prints a version and exits 0; `mytools` with no
 arguments prints usage to stderr and exits 2.
 
-**Accepted deviations from bedtools: none**, other than the usage-error exit codes in
-§7. If you find one you cannot fix, write it down here with the reason.
+**Accepted deviations from bedtools:** the usage-error exit codes in §7, and one
+found while implementing `sort` (#5):
+
+- **`sort` breaks ties on `start` by `end`; bedtools leaves them unordered.** Measured
+  on v2.31.1: `bedtools sort` orders by `(chrom, start)` only, and its tie order is
+  whatever its unstable sort leaves behind — input order for a block of up to 16
+  equal-start features, scrambled past that. On `chr1 100 300 / chr1 100 200 /
+  chr1 100 250` it prints them in input order; on 20,000 equal-start features it prints
+  neither input order nor end order. There is no rule there to match, so we follow §5
+  instead: `(chrom, start, end)`, stable, deterministic. Every committed fixture —
+  `a.bed`, `b.bed`, `genes.bed`, `hg002.highconf.bed` — is byte-identical either way,
+  which is why golden case 1 holds regardless.
 
 ## 9. Language and layout
 

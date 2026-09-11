@@ -14,6 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from mytools.cli import main  # noqa: E402
 
+DATA = Path(__file__).resolve().parent.parent / "data"
+
 
 def run_sort(capsys, path):
     """Run `mytools sort -i <path>` in-process. Returns (exit code, stdout lines)."""
@@ -59,6 +61,9 @@ class TestOrder:
         assert names(lines) == ["first", "second", "third"]
 
     def test_end_breaks_ties_on_start(self, tmp_path, capsys):
+        # Ours, not bedtools': it orders by (chrom, start) alone and leaves these in
+        # whatever order its unstable sort produced. SPEC.md section 8 records why we
+        # pick a deterministic rule instead.
         path = write(
             tmp_path,
             "chr1\t100\t300\twide\t0\t+\n"
@@ -80,6 +85,16 @@ class TestOrder:
         rc, lines = run_sort(capsys, path)
         assert rc == 0
         assert names(lines) == ["a09", "a10"]
+
+    def test_sorting_sorted_output_changes_nothing(self, tmp_path, capsys):
+        # Run on the real fixture rather than a hand-made one: data/a.bed carries the
+        # zero-length and duplicate-coordinate features that an unstable sort would
+        # shuffle on the second pass.
+        rc, once = run_sort(capsys, DATA / "a.bed")
+        assert rc == 0
+        rc, twice = run_sort(capsys, write(tmp_path, "\n".join(once) + "\n"))
+        assert rc == 0
+        assert twice == once
 
     def test_position_zero_sorts_first(self, tmp_path, capsys):
         # Position 0 is a real coordinate, not a missing value.
@@ -132,6 +147,11 @@ class TestColumnsPreserved:
         assert rc == 0
         assert lines == ["chr1\t100\t200\tonly\t0\t+"]
 
+    def test_output_ends_with_a_trailing_newline(self, tmp_path, capsys):
+        # SPEC.md section 5: LF line endings, and the final line has one too.
+        main(["sort", "-i", str(write(tmp_path, "chr1\t10\t20\tonly\t0\t+\n"))])
+        assert capsys.readouterr().out == "chr1\t10\t20\tonly\t0\t+\n"
+
     def test_empty_input_prints_nothing_and_succeeds(self, tmp_path, capsys):
         rc, lines = run_sort(capsys, write(tmp_path, ""))
         assert rc == 0
@@ -159,6 +179,12 @@ class TestExitCodes:
         captured = capsys.readouterr()
         assert captured.out == ""
         assert "start > end" in captured.err
+
+    def test_missing_required_flag_exits_2(self):
+        # argparse handles this one and exits on its own rather than returning.
+        with pytest.raises(SystemExit) as raised:
+            main(["sort"])
+        assert raised.value.code == 2
 
     def test_missing_file_exits_2(self, tmp_path, capsys):
         # A deliberate deviation: bedtools exits 1 here. SPEC.md section 7 explains
